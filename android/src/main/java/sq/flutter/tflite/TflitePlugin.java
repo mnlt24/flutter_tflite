@@ -47,11 +47,20 @@ import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Vector;
+import java.lang.Runnable;
+import java.util.concurrent.Callable;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorCompletionService;
 
 
 public class TflitePlugin implements MethodCallHandler {
   private final Registrar mRegistrar;
   private Interpreter tfLite;
+  private GpuDelegate gpuDelegate;
   private boolean tfLiteBusy = false;
   private int inputSize = 0;
   private Vector<String> labels;
@@ -86,6 +95,8 @@ public class TflitePlugin implements MethodCallHandler {
 
   private TflitePlugin(Registrar registrar) {
     this.mRegistrar = registrar;
+
+    new ConsumerThread(taskCS).start();
   }
 
   @Override
@@ -130,6 +141,12 @@ public class TflitePlugin implements MethodCallHandler {
     } else if (call.method.equals("detectObjectOnFrame")) {
       try {
         detectObjectOnFrame((HashMap) call.arguments, result);
+      } catch (Exception e) {
+        result.error("Failed to run model", e.getMessage(), e);
+      }
+    } else if (call.method.equals("detectObjectOnByteArray")) {
+      try {
+        detectObjectOnByteArray((HashMap) call.arguments, result);
       } catch (Exception e) {
         result.error("Failed to run model", e.getMessage(), e);
       }
@@ -194,6 +211,64 @@ public class TflitePlugin implements MethodCallHandler {
     }
   }
 
+  /////////////////
+
+  //TaskCompletionService taskCS = new TaskCompletionService(Executors.newCachedThreadPool());
+  TaskCompletionService taskCS = new TaskCompletionService(Executors.newSingleThreadScheduledExecutor());
+
+  private class TaskCompletionService extends ExecutorCompletionService {
+    private ExecutorService executor;
+    public TaskCompletionService(ExecutorService es) {
+      super(es);
+      executor = es;
+    }
+
+    public void shutdown() {
+      executor.shutdown();
+    }
+
+    public boolean isTerminated() {
+      return executor.isTerminated();
+    }
+  }
+
+  private class ConsumerThread extends Thread {
+    private TaskCompletionService tcs;
+    private ConsumerThread(TaskCompletionService cs) {
+      this.tcs = cs;
+    }
+
+    @Override
+    public void run() {
+      super.run();
+      try {
+        while(!tcs.isTerminated()) {
+          Future<TFLCallableTask> result = tcs.poll(100, TimeUnit.MILLISECONDS);
+          if(null != result) {
+            onTFLResult(result.get());
+          }
+        }
+      }
+      catch(InterruptedException e) {
+        e.printStackTrace();
+      }
+      catch(ExecutionException e) {
+        e.printStackTrace();
+      }
+    }
+  }
+
+  private void onTFLResult(final TFLCallableTask task) {
+    mRegistrar.activity().runOnUiThread(new Runnable() {
+      @Override
+      public void run() {
+        task.onResult();
+      }
+    });
+  }
+
+  /////////////////
+
   private String loadModel(HashMap args) throws IOException {
     String model = args.get("model").toString();
     Object isAssetObj = args.get("isAsset");
@@ -219,13 +294,13 @@ public class TflitePlugin implements MethodCallHandler {
     }
 
     int numThreads = (int) args.get("numThreads");
-    boolean useGpuDelegate = useGpuDelegateObj == null ? false : (boolean) useGpuDelegate;
+    boolean useGpuDelegate = useGpuDelegateObj == null ? false : (boolean)useGpuDelegateObj;
 
     final Interpreter.Options tfliteOptions = new Interpreter.Options();
     tfliteOptions.setNumThreads(numThreads);
     if (useGpuDelegate){
-      GpuDelegate delegate = new GpuDelegate();
-      tfliteOptions.addDelegate(delegate)
+      gpuDelegate = new GpuDelegate();
+      tfliteOptions.addDelegate(gpuDelegate);
     }
     tfLite = new Interpreter(buffer, tfliteOptions);
 
@@ -372,6 +447,12 @@ public class TflitePlugin implements MethodCallHandler {
     return feedInputTensor(bitmapRaw, mean, std);
   }
 
+  ByteBuffer feedInputTensorByteArray(byte[] byteArray, float mean, float std) throws IOException {
+    Bitmap bitmapRaw = BitmapFactory.decodeByteArray(byteArray, 0, byteArray.length);
+
+    return feedInputTensor(bitmapRaw, mean, std);
+  }
+
   ByteBuffer feedInputTensorFrame(List<byte[]> bytesList, int imageHeight, int imageWidth, float mean, float std, int rotation) throws IOException {
     ByteBuffer Y = ByteBuffer.wrap(bytesList.get(0));
     ByteBuffer U = ByteBuffer.wrap(bytesList.get(1));
@@ -418,6 +499,40 @@ public class TflitePlugin implements MethodCallHandler {
     yuvToRgbIntrinsic.setInput(in);
     yuvToRgbIntrinsic.forEach(out);
     return out;
+  }
+
+  private abstract class TFLCallableTask implements Callable<TFLCallableTask> {
+    Result result;
+    boolean asynch;
+
+    TFLCallableTask(HashMap args, Result result) {
+      //if (tfLiteBusy) throw new RuntimeException("Interpreter busy");
+      //else tfLiteBusy = true;
+      Object asynch = args.get("asynch");
+      this.asynch = asynch == null ? false : (boolean) asynch;
+      this.result = result;
+    }
+
+    abstract void runTflite();
+    abstract void onRunTfliteDone();
+    abstract List getResult();
+
+    public void executeTfliteTask() {
+      taskCS.submit(this);
+    }
+
+    public void onResult() {
+      result.success(this.getResult());
+    }
+
+    @Override
+    public TFLCallableTask call() throws Exception {
+      runTflite();
+      //tfLiteBusy = false;
+      onRunTfliteDone();
+
+      return this;
+    }
   }
 
   private abstract class TfliteTask extends AsyncTask<Void, Void, Void> {
@@ -591,6 +706,30 @@ public class TflitePlugin implements MethodCallHandler {
     }
   }
 
+  void detectObjectOnByteArray(HashMap args, Result result) throws IOException {
+    byte[] byteArray = (byte[]) args.get("byteArray");
+    String model = args.get("model").toString();
+    double mean = (double) (args.get("imageMean"));
+    float IMAGE_MEAN = (float) mean;
+    double std = (double) (args.get("imageStd"));
+    float IMAGE_STD = (float) std;
+    double threshold = (double) args.get("threshold");
+    float THRESHOLD = (float) threshold;
+    List<Double> ANCHORS = (ArrayList) args.get("anchors");
+    int BLOCK_SIZE = (int) args.get("blockSize");
+    int NUM_BOXES_PER_BLOCK = (int) args.get("numBoxesPerBlock");
+    int NUM_RESULTS_PER_CLASS = (int) args.get("numResultsPerClass");
+
+    //ByteBuffer imgData = feedInputTensorByteArray(byteArray, IMAGE_MEAN, IMAGE_STD);
+
+    if (model.equals("SSDMobileNet")) {
+      new RunSSDMobileNet(args, byteArray, IMAGE_MEAN, IMAGE_STD, NUM_RESULTS_PER_CLASS, THRESHOLD, result).executeTfliteTask();
+      //new RunSSDMobileNet(args, imgData, NUM_RESULTS_PER_CLASS, THRESHOLD, result).executeTfliteTask();
+    } else {
+      //new RunYOLO(args, imgData, BLOCK_SIZE, NUM_BOXES_PER_BLOCK, ANCHORS, THRESHOLD, NUM_RESULTS_PER_CLASS, result).executeTfliteTask();
+    }
+  }
+
   void detectObjectOnFrame(HashMap args, Result result) throws IOException {
     List<byte[]> bytesList = (ArrayList) args.get("bytesList");
     String model = args.get("model").toString();
@@ -618,7 +757,8 @@ public class TflitePlugin implements MethodCallHandler {
     }
   }
 
-  private class RunSSDMobileNet extends TfliteTask {
+  //private class RunSSDMobileNet extends TfliteTask {
+  private class RunSSDMobileNet extends TFLCallableTask {
     int num;
     int numResultsPerClass;
     float threshold;
@@ -629,6 +769,33 @@ public class TflitePlugin implements MethodCallHandler {
     Object[] inputArray;
     Map<Integer, Object> outputMap = new HashMap<>();
     long startTime;
+
+    byte[] inputBytes;
+    float inputMean;
+    float inputStd;
+
+    List<Map<String, Object>> results;
+
+    RunSSDMobileNet(HashMap args, byte[] bytes, float mean, float std, int numResultsPerClass, float threshold, Result result) {
+      super(args, result);
+      this.num = tfLite.getOutputTensor(0).shape()[1];
+      this.numResultsPerClass = numResultsPerClass;
+      this.threshold = threshold;
+      this.outputLocations = new float[1][num][4];
+      this.outputClasses = new float[1][num];
+      this.outputScores = new float[1][num];
+
+      this.inputBytes = bytes;
+      this.inputMean = mean;
+      this.inputStd = std;
+
+      outputMap.put(0, outputLocations);
+      outputMap.put(1, outputClasses);
+      outputMap.put(2, outputScores);
+      outputMap.put(3, numDetections);
+
+      startTime = SystemClock.uptimeMillis();
+    }
 
     RunSSDMobileNet(HashMap args, ByteBuffer imgData, int numResultsPerClass, float threshold, Result result) {
       super(args, result);
@@ -649,14 +816,27 @@ public class TflitePlugin implements MethodCallHandler {
     }
 
     protected void runTflite() {
+      if(null == this.inputArray) {
+        try {
+          ByteBuffer imgData = feedInputTensorByteArray(inputBytes, inputMean, inputStd);
+          this.inputArray = new Object[]{imgData};
+        } catch (Exception e) {
+          e.printStackTrace();
+          return;
+        }
+      }
       tfLite.runForMultipleInputsOutputs(inputArray, outputMap);
+    }
+
+    protected List getResult() {
+      return results;
     }
 
     protected void onRunTfliteDone() {
       Log.v("time", "Inference took " + (SystemClock.uptimeMillis() - startTime));
 
       Map<String, Integer> counters = new HashMap<>();
-      final List<Map<String, Object>> results = new ArrayList<>();
+      results = new ArrayList<>();
 
       for (int i = 0; i < numDetections[0]; ++i) {
         if (outputScores[0][i] < threshold) continue;
@@ -691,8 +871,6 @@ public class TflitePlugin implements MethodCallHandler {
 
         results.add(ret);
       }
-
-      result.success(results);
     }
   }
 
@@ -1556,8 +1734,16 @@ public class TflitePlugin implements MethodCallHandler {
   }
 
   private void close() {
-    if (tfLite != null)
+    if (tfLite != null) {
       tfLite.close();
+      tfLite = null;
+    }
+
+    if (gpuDelegate != null) {
+      gpuDelegate.close();
+      gpuDelegate = null;
+    }
+
     labels = null;
     labelProb = null;
   }

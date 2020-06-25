@@ -7,12 +7,13 @@ import 'package:flutter/services.dart';
 class Tflite {
   static const MethodChannel _channel = const MethodChannel('tflite');
 
-  static Future<String> loadModel(
-      {@required String model,
-      String labels = "",
-      int numThreads = 1,
-      bool isAsset = true,
-      bool useGpuDelegate = false}) async {
+  static Future<String> loadModel({
+    @required String model,
+    String labels = "",
+    int numThreads = 1,
+    bool isAsset = true,
+    bool useGpuDelegate = false
+  }) async {
     return await _channel.invokeMethod(
       'loadModel',
       {
@@ -182,6 +183,36 @@ class Tflite {
         "imageMean": imageMean,
         "imageStd": imageStd,
         "rotation": rotation,
+        "threshold": threshold,
+        "numResultsPerClass": numResultsPerClass,
+        "anchors": anchors,
+        "blockSize": blockSize,
+        "numBoxesPerBlock": numBoxesPerBlock,
+        "asynch": asynch,
+      },
+    );
+  }
+
+  static Future<List> detectObjectOnByteArray({
+    @required Uint8List byteArray,
+    String model = "SSDMobileNet",
+    double imageMean = 127.5,
+    double imageStd = 127.5,
+    double threshold = 0.1,
+    int numResultsPerClass = 5,
+    // Used in YOLO only
+    List anchors = anchors,
+    int blockSize = 32,
+    int numBoxesPerBlock = 5,
+    bool asynch = true,
+  }) async {
+    return await _channel.invokeMethod(
+      'detectObjectOnByteArray',
+      {
+        "byteArray": byteArray,
+        "model": model,
+        "imageMean": imageMean,
+        "imageStd": imageStd,
         "threshold": threshold,
         "numResultsPerClass": numResultsPerClass,
         "anchors": anchors,
