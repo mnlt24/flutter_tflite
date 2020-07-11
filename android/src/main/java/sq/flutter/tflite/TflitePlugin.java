@@ -272,7 +272,6 @@ public class TflitePlugin implements MethodCallHandler {
   private String loadModel(HashMap args) throws IOException {
     String model = args.get("model").toString();
     Object isAssetObj = args.get("isAsset");
-    Object useGpuDelegateObj = args.get("useGpuDelegate");
     boolean isAsset = isAssetObj == null ? false : (boolean) isAssetObj;
     MappedByteBuffer buffer = null;
     String key = null;
@@ -294,13 +293,13 @@ public class TflitePlugin implements MethodCallHandler {
     }
 
     int numThreads = (int) args.get("numThreads");
-    boolean useGpuDelegate = useGpuDelegateObj == null ? false : (boolean)useGpuDelegateObj;
+    boolean useGpuDelegate = (boolean) args.getOrDefault("useGpuDelegate", false);
 
     final Interpreter.Options tfliteOptions = new Interpreter.Options();
     tfliteOptions.setNumThreads(numThreads);
     if (useGpuDelegate){
-      gpuDelegate = new GpuDelegate();
-      tfliteOptions.addDelegate(gpuDelegate);
+      GpuDelegate delegate = new GpuDelegate();
+      tfliteOptions.addDelegate(delegate);
     }
     tfLite = new Interpreter(buffer, tfliteOptions);
 
