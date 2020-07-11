@@ -38,6 +38,7 @@ void runModelOnBinary(NSDictionary* args, FlutterResult result);
 void runModelOnFrame(NSDictionary* args, FlutterResult result);
 void detectObjectOnImage(NSDictionary* args, FlutterResult result);
 void detectObjectOnBinary(NSDictionary* args, FlutterResult result);
+void detectObjectOnByteArray(NSDictionary* args, FlutterResult result);
 void detectObjectOnFrame(NSDictionary* args, FlutterResult result);
 void runPix2PixOnImage(NSDictionary* args, FlutterResult result);
 void runPix2PixOnBinary(NSDictionary* args, FlutterResult result);
@@ -84,6 +85,8 @@ void close();
     detectObjectOnImage(call.arguments, result);
   } else if ([@"detectObjectOnBinary" isEqualToString:call.method]) {
     detectObjectOnBinary(call.arguments, result);
+  } else if ([@"detectObjectOnByteArray" isEqualToString:call.method]) {
+    detectObjectOnByteArray(call.arguments, result);
   } else if ([@"detectObjectOnFrame" isEqualToString:call.method]) {
     detectObjectOnFrame(call.arguments, result);
   } else if ([@"runPix2PixOnImage" isEqualToString:call.method]) {
@@ -198,7 +201,7 @@ NSString* loadModel(NSObject<FlutterPluginRegistrar>* _registrar, NSDictionary* 
    }
 #else
   tflite::ops::builtin::BuiltinOpResolver resolver;
-  tflite::InterpreterBuilder(*model, resolver)(&interpreter);
+  tflite::InterpreterBuilder(*model.get(), resolver)(&interpreter);
   if (!interpreter) {
     return @"Failed to construct interpreter";
   }
@@ -404,6 +407,17 @@ void feedInputTensorImage(const NSString* image_path, float input_mean, float in
   int image_height;
   int image_width;
   std::vector<uint8_t> image_data = LoadImageFromFile([image_path UTF8String], &image_width, &image_height, &image_channels);
+  uint8_t* in = image_data.data();
+  feedInputTensor(in, input_size, image_height, image_width, image_channels, input_mean, input_std);
+}
+
+void feedInputTensorByteArray(const FlutterStandardTypedData* typedData, float input_mean, float input_std, int* input_size) {
+  int image_channels;
+  int image_height;
+  int image_width;
+  uint8_t* bytes = (uint8_t*)[[typedData data] bytes];
+  const size_t bytes_len = (size_t)[[typedData data] length];
+  std::vector<uint8_t> image_data = LoadImageFromByteArray(bytes, bytes_len, &image_width, &image_height, &image_channels);
   uint8_t* in = image_data.data();
   feedInputTensor(in, input_size, image_height, image_width, image_channels, input_mean, input_std);
 }
@@ -767,6 +781,44 @@ void detectObjectOnImage(NSDictionary* args, FlutterResult result) {
     else
       return result(parseYOLO((int)labels.size(), anchors, block_size, num_boxes_per_block, num_results_per_class,
                               threshold, input_size));
+  });
+}
+
+void detectObjectOnByteArray(NSDictionary* args, FlutterResult result) {
+  const FlutterStandardTypedData* typedData = args[@"byteArray"];
+  const NSString* model = args[@"model"];
+  const float input_mean = [args[@"imageMean"] floatValue];
+  const float input_std = [args[@"imageStd"] floatValue];
+  const float threshold = [args[@"threshold"] floatValue];
+
+  const NSArray* anchors = args[@"anchors"];
+  const int num_boxes_per_block = [args[@"numBoxesPerBlock"] intValue];
+  const int block_size = [args[@"blockSize"] floatValue];
+  const int num_results_per_class = [args[@"numResultsPerClass"] intValue];
+
+  NSMutableArray* empty = [@[] mutableCopy];
+
+  if (!interpreter || interpreter_busy) {
+    NSLog(@"Failed to construct interpreter or busy.");
+    return result(empty);
+  }
+
+  int input_size;
+  feedInputTensorByteArray(typedData, input_mean, input_std, &input_size);
+
+  runTflite(args, ^(TfLiteStatus status) {
+    if(status != kTfLiteOk) {
+      NSLog(@"Failed to invoke!");
+      return result(empty);
+    }
+
+    if([model isEqual: @"SSDMobileNet"]) {
+      return result(parseSSDMobileNet(threshold, num_results_per_class));
+    }
+    else {
+      return result(parseYOLO((int)(labels.size() - 1), anchors, block_size, num_boxes_per_block, num_results_per_class,
+                              threshold, input_size));
+    }
   });
 }
 

@@ -9,38 +9,51 @@
 #import <CoreImage/CoreImage.h>
 #import <ImageIO/ImageIO.h>
 
-std::vector<uint8_t> LoadImageFromFile(const char* file_name,
-                                     int* out_width, int* out_height,
-                                     int* out_channels) {
-  FILE* file_handle = fopen(file_name, "rb");
-  fseek(file_handle, 0, SEEK_END);
-  const size_t bytes_in_file = ftell(file_handle);
-  fseek(file_handle, 0, SEEK_SET);
-  std::vector<uint8_t> file_data(bytes_in_file);
-  fread(file_data.data(), 1, bytes_in_file, file_handle);
-  fclose(file_handle);
+static const uint8_t _jpg_header[] = { 0xff, 0xd8, 0xff, 0xe0 };
+static const uint8_t _png_header[] = { 0x89, 0x50, 0x4e, 0x47 };
 
-  CFDataRef file_data_ref = CFDataCreateWithBytesNoCopy(NULL, file_data.data(),
-                                                        bytes_in_file,
-                                                        kCFAllocatorNull);
-  CGDataProviderRef image_provider = CGDataProviderCreateWithCFData(file_data_ref);
-  
-  const char* suffix = strrchr(file_name, '.');
-  if (!suffix || suffix == file_name) {
-    suffix = "";
+bool CheckFormat(uint8_t* bytes, const size_t bytes_len, const uint8_t* header) {
+  if(bytes_len > 4) {
+    for(int index = 0; index < 4; ++index) {
+      if(bytes[index] != header[index]) {
+        return false;
+      }
+    }
+
+    return true;
   }
+
+  return false;
+}
+
+bool IsJpg(uint8_t* bytes, const size_t bytes_len) {
+  return CheckFormat(bytes, bytes_len, _jpg_header);
+}
+
+bool IsPng(uint8_t* bytes, const size_t bytes_len) {
+  return CheckFormat(bytes, bytes_len, _png_header);
+}
+
+std::vector<uint8_t> LoadImageFromByteArray(uint8_t* bytes, const size_t bytes_len, int* out_width,
+                                            int* out_height, int* out_channels) {
+  CFDataRef bytes_ref = CFDataCreateWithBytesNoCopy(NULL, bytes,
+                                                        bytes_len,
+                                                        kCFAllocatorNull);
+  CGDataProviderRef image_provider = CGDataProviderCreateWithCFData(bytes_ref);
+  
   CGImageRef image;
-  if (strcasecmp(suffix, ".png") == 0) {
+  if(IsPng(bytes, bytes_len)) {
     image = CGImageCreateWithPNGDataProvider(image_provider, NULL, true,
                                              kCGRenderingIntentDefault);
-  } else if ((strcasecmp(suffix, ".jpg") == 0) ||
-             (strcasecmp(suffix, ".jpeg") == 0)) {
+  }
+  else if(IsJpg(bytes, bytes_len)) {
     image = CGImageCreateWithJPEGDataProvider(image_provider, NULL, true,
                                               kCGRenderingIntentDefault);
   } else {
     CFRelease(image_provider);
-    CFRelease(file_data_ref);
-    fprintf(stderr, "Unknown suffix for file '%s'\n", file_name);
+    CFRelease(bytes_ref);
+    //fprintf(stderr, "Unknown suffix for file '%s'\n", file_name);
+    fprintf(stderr, "Unknown format");
     out_width = 0;
     out_height = 0;
     *out_channels = 0;
@@ -64,12 +77,26 @@ std::vector<uint8_t> LoadImageFromFile(const char* file_name,
   CGContextRelease(context);
   CFRelease(image);
   CFRelease(image_provider);
-  CFRelease(file_data_ref);
+  CFRelease(bytes_ref);
   
   *out_width = width;
   *out_height = height;
   *out_channels = channels;
   return result;
+}
+
+std::vector<uint8_t> LoadImageFromFile(const char* file_name,
+                                     int* out_width, int* out_height,
+                                     int* out_channels) {
+  FILE* file_handle = fopen(file_name, "rb");
+  fseek(file_handle, 0, SEEK_END);
+  const size_t bytes_in_file = ftell(file_handle);
+  fseek(file_handle, 0, SEEK_SET);
+  std::vector<uint8_t> file_data(bytes_in_file);
+  fread(file_data.data(), 1, bytes_in_file, file_handle);
+  fclose(file_handle);
+
+  return LoadImageFromByteArray(file_data.data(), bytes_in_file, out_width, out_height, out_channels);
 }
 
 NSData *CompressImage(NSMutableData *image, int width, int height, int bytesPerPixel) {
