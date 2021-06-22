@@ -191,8 +191,8 @@ class Tflite {
     );
   }
 
-  static Future<List> detectObjectOnByteArray({
-    @required Uint8List byteArray,
+  static Future<List?> detectObjectOnByteArray({
+    required Uint8List byteArray,
     String model = "SSDMobileNet",
     double imageMean = 127.5,
     double imageStd = 127.5,
