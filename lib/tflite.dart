@@ -1,19 +1,17 @@
 import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui' show Color;
-import 'package:meta/meta.dart';
 import 'package:flutter/services.dart';
 
 class Tflite {
   static const MethodChannel _channel = const MethodChannel('tflite');
 
-  static Future<String> loadModel({
-    @required String model,
-    String labels = "",
-    int numThreads = 1,
-    bool isAsset = true,
-    bool useGpuDelegate = false
-  }) async {
+  static Future<String?> loadModel(
+      {required String model,
+      String labels = "",
+      int numThreads = 1,
+      bool isAsset = true,
+      bool useGpuDelegate = false}) async {
     return await _channel.invokeMethod(
       'loadModel',
       {
@@ -26,8 +24,8 @@ class Tflite {
     );
   }
 
-  static Future<List> runModelOnImage(
-      {@required String path,
+  static Future<List?> runModelOnImage(
+      {required String path,
       double imageMean = 117.0,
       double imageStd = 1.0,
       int numResults = 5,
@@ -46,8 +44,8 @@ class Tflite {
     );
   }
 
-  static Future<List> runModelOnBinary(
-      {@required Uint8List binary,
+  static Future<List?> runModelOnBinary(
+      {required Uint8List binary,
       int numResults = 5,
       double threshold = 0.1,
       bool asynch = true}) async {
@@ -62,13 +60,13 @@ class Tflite {
     );
   }
 
-  static Future<List> runModelOnFrame(
-      {@required List<Uint8List> bytesList,
+  static Future<List?> runModelOnFrame(
+      {required List<Uint8List> bytesList,
       int imageHeight = 1280,
       int imageWidth = 720,
       double imageMean = 127.5,
       double imageStd = 127.5,
-      int rotation: 90, // Android only
+      int rotation = 90, // Android only
       int numResults = 5,
       double threshold = 0.1,
       bool asynch = true}) async {
@@ -101,8 +99,8 @@ class Tflite {
     9.16828
   ];
 
-  static Future<List> detectObjectOnImage({
-    @required String path,
+  static Future<List?> detectObjectOnImage({
+    required String path,
     String model = "SSDMobileNet",
     double imageMean = 127.5,
     double imageStd = 127.5,
@@ -131,8 +129,8 @@ class Tflite {
     );
   }
 
-  static Future<List> detectObjectOnBinary({
-    @required Uint8List binary,
+  static Future<List?> detectObjectOnBinary({
+    required Uint8List binary,
     String model = "SSDMobileNet",
     double threshold = 0.1,
     int numResultsPerClass = 5,
@@ -157,8 +155,8 @@ class Tflite {
     );
   }
 
-  static Future<List> detectObjectOnFrame({
-    @required List<Uint8List> bytesList,
+  static Future<List?> detectObjectOnFrame({
+    required List<Uint8List> bytesList,
     String model = "SSDMobileNet",
     int imageHeight = 1280,
     int imageWidth = 720,
@@ -227,8 +225,8 @@ class Tflite {
     return await _channel.invokeMethod('close');
   }
 
-  static Future<Uint8List> runPix2PixOnImage(
-      {@required String path,
+  static Future<Uint8List?> runPix2PixOnImage(
+      {required String path,
       double imageMean = 0,
       double imageStd = 255.0,
       String outputType = "png",
@@ -245,8 +243,8 @@ class Tflite {
     );
   }
 
-  static Future<Uint8List> runPix2PixOnBinary(
-      {@required Uint8List binary,
+  static Future<Uint8List?> runPix2PixOnBinary(
+      {required Uint8List binary,
       String outputType = "png",
       bool asynch = true}) async {
     return await _channel.invokeMethod(
@@ -259,8 +257,8 @@ class Tflite {
     );
   }
 
-  static Future<Uint8List> runPix2PixOnFrame({
-    @required List<Uint8List> bytesList,
+  static Future<Uint8List?> runPix2PixOnFrame({
+    required List<Uint8List> bytesList,
     int imageHeight = 1280,
     int imageWidth = 720,
     double imageMean = 0,
@@ -309,11 +307,11 @@ class Tflite {
     Color.fromARGB(255, 0, 64, 128).value, // tv-monitor
   ];
 
-  static Future<Uint8List> runSegmentationOnImage(
-      {@required String path,
+  static Future<Uint8List?> runSegmentationOnImage(
+      {required String path,
       double imageMean = 0,
       double imageStd = 255.0,
-      List<int> labelColors,
+      List<int>? labelColors,
       String outputType = "png",
       bool asynch = true}) async {
     return await _channel.invokeMethod(
@@ -329,9 +327,9 @@ class Tflite {
     );
   }
 
-  static Future<Uint8List> runSegmentationOnBinary(
-      {@required Uint8List binary,
-      List<int> labelColors,
+  static Future<Uint8List?> runSegmentationOnBinary(
+      {required Uint8List binary,
+      List<int>? labelColors,
       String outputType = "png",
       bool asynch = true}) async {
     return await _channel.invokeMethod(
@@ -345,14 +343,14 @@ class Tflite {
     );
   }
 
-  static Future<Uint8List> runSegmentationOnFrame(
-      {@required List<Uint8List> bytesList,
+  static Future<Uint8List?> runSegmentationOnFrame(
+      {required List<Uint8List> bytesList,
       int imageHeight = 1280,
       int imageWidth = 720,
       double imageMean = 0,
       double imageStd = 255.0,
       int rotation: 90, // Android only
-      List<int> labelColors,
+      List<int>? labelColors,
       String outputType = "png",
       bool asynch = true}) async {
     return await _channel.invokeMethod(
@@ -371,8 +369,8 @@ class Tflite {
     );
   }
 
-  static Future<List> runPoseNetOnImage(
-      {@required String path,
+  static Future<List?> runPoseNetOnImage(
+      {required String path,
       double imageMean = 127.5,
       double imageStd = 127.5,
       int numResults = 5,
@@ -393,8 +391,8 @@ class Tflite {
     );
   }
 
-  static Future<List> runPoseNetOnBinary(
-      {@required Uint8List binary,
+  static Future<List?> runPoseNetOnBinary(
+      {required Uint8List binary,
       int numResults = 5,
       double threshold = 0.5,
       int nmsRadius = 20,
@@ -411,8 +409,8 @@ class Tflite {
     );
   }
 
-  static Future<List> runPoseNetOnFrame(
-      {@required List<Uint8List> bytesList,
+  static Future<List?> runPoseNetOnFrame(
+      {required List<Uint8List> bytesList,
       int imageHeight = 1280,
       int imageWidth = 720,
       double imageMean = 127.5,
